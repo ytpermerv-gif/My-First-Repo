@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>서버 스위치</title>
+<style>
+  :root {
+    --bg: #f5f5f7;
+    --card: #ffffff;
+    --text: #1d1d1f;
+    --sub: #6e6e73;
+    --on: #34c759;
+    --off: #ff3b30;
+    --pending: #ff9f0a;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #000000;
+      --card: #1c1c1e;
+      --text: #f5f5f7;
+      --sub: #a1a1a6;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #000000;
+    --card: #1c1c1e;
+    --text: #f5f5f7;
+    --sub: #a1a1a6;
+  }
+  html, body {
+    height: 100%;
+    margin: 0;
+  }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .card {
+    background: var(--card);
+    border-radius: 20px;
+    padding: 32px 24px;
+    max-width: 360px;
+    width: 100%;
+    text-align: center;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+  }
+  h1 {
+    font-size: 20px;
+    margin: 0 0 4px;
+  }
+  .status-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .status-text {
+    color: var(--sub);
+    font-size: 14px;
+    margin-bottom: 28px;
+  }
+  button {
+    width: 100%;
+    padding: 16px;
+    border: none;
+    border-radius: 14px;
+    font-size: 17px;
+    font-weight: 600;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  button:active { opacity: 0.7; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  .btn-start { background: var(--on); color: white; }
+  .btn-stop { background: var(--off); color: white; }
+  .btn-restart { background: #e5e5ea; color: var(--text); }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .btn-restart { background: #2c2c2e; color: var(--text); }
+  }
+  .log {
+    margin-top: 16px;
+    font-size: 12px;
+    color: var(--sub);
+    min-height: 16px;
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>🎮 서버 스위치</h1>
+    <div class="status-text">
+      <span class="status-dot" id="dot" style="background:#999"></span>
+      <span id="statusLabel">상태 확인 중...</span>
+    </div>
+    <button class="btn-start" id="startBtn">▶ 서버 켜기</button>
+    <button class="btn-stop" id="stopBtn">■ 서버 끄기</button>
+    <button class="btn-restart" id="restartBtn">↻ 재시작</button>
+    <div class="log" id="log"></div>
+  </div>
+
+<script>
+  // 👇 Cloudflare Worker 배포 후 여기에 실제 주소를 넣어주세요.
+  // 예: "https://server-switch.yourname.workers.dev"
+  const WORKER_URL = "https://server-switch.soda0211.workers.dev";
+
+  const dot = document.getElementById("dot");
+  const label = document.getElementById("statusLabel");
+  const log = document.getElementById("log");
+  const startBtn = document.getElementById("startBtn");
+  const stopBtn = document.getElementById("stopBtn");
+  const restartBtn = document.getElementById("restartBtn");
+
+  const stateMap = {
+    running: { text: "켜짐", color: "#34c759" },
+    starting: { text: "시작하는 중...", color: "#ff9f0a" },
+    stopping: { text: "종료하는 중...", color: "#ff9f0a" },
+    offline: { text: "꺼짐", color: "#ff3b30" },
+    unknown: { text: "상태 확인 불가", color: "#999" },
+  };
+
+  function setButtons(disabled) {
+    startBtn.disabled = disabled;
+    stopBtn.disabled = disabled;
+    restartBtn.disabled = disabled;
+  }
+
+  async function refreshStatus() {
+    try {
+      const res = await fetch(`${WORKER_URL}/status`);
+      const data = await res.json();
+      const s = stateMap[data.state] || stateMap.unknown;
+      dot.style.background = s.color;
+      label.textContent = s.text;
+    } catch (e) {
+      dot.style.background = "#999";
+      label.textContent = "연결 실패 (워커 주소 확인 필요)";
+    }
+  }
+
+  async function sendPower(signal, actionLabel) {
+    setButtons(true);
+    log.textContent = `${actionLabel} 요청 보내는 중...`;
+    try {
+      const res = await fetch(`${WORKER_URL}/power`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signal }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        log.textContent = `${actionLabel} 완료`;
+      } else {
+        log.textContent = `실패: ${data.detail || "알 수 없는 오류"}`;
+      }
+    } catch (e) {
+      log.textContent = "요청 실패 (네트워크 확인)";
+    }
+    setTimeout(refreshStatus, 1500);
+    setButtons(false);
+  }
+
+  startBtn.addEventListener("click", () => sendPower("start", "켜기"));
+  stopBtn.addEventListener("click", () => sendPower("stop", "끄기"));
+  restartBtn.addEventListener("click", () => sendPower("restart", "재시작"));
+
+  refreshStatus();
+  setInterval(refreshStatus, 10000);
+</script>
+</body>
+</html>
